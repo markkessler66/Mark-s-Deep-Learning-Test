@@ -1,0 +1,135 @@
+import torch
+import random as r
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+
+
+def generate_biased_dice_seq(len_seq):
+    """
+    1: 5%
+    2: 5%
+    3: 10%
+    4: 10%
+    5: 20%
+    6: 50%
+    """
+    seq = []
+    for dummy in range(len_seq):
+        x = r.random()
+
+        if x <= .05:
+            seq.append(1)
+        elif x <=.1:
+            seq.append(2)
+        elif x <=.2:
+            seq.append(3)
+        elif x <=.3:
+            seq.append(4)
+        elif x <=.5:
+            seq.append(5)
+        else:
+            seq.append(6)
+    
+    return seq
+
+def unbiased_dice_seq(len_seq):
+    seq = [r.randint(1,6) for dummy in range(len_seq)]
+    return seq
+
+
+def generate_training_data(num_samples,len_seq):
+    training = []
+    target = []
+    for dummy in range(num_samples):
+        training.append(generate_biased_dice_seq(len_seq))
+        target.append([1,0])
+        training.append(unbiased_dice_seq(len_seq))
+        target.append([0,1])
+    return torch.Tensor(training), torch.Tensor(target)
+
+def generate_test_data(num_samples,len_seq):
+    test = []
+    target = []
+    for dummy in range(num_samples):
+        test.append(generate_biased_dice_seq(len_seq))
+        target.append([1,0])
+        test.append(unbiased_dice_seq(len_seq))
+        target.append([0,1])
+    return torch.Tensor(test),torch.Tensor(target)
+
+train = generate_training_data(500,600)
+test = generate_test_data(32,600)
+
+
+"""
+trainset = torch.utils.data.DataLoader(train, batch_size=10, shuffle=True)
+testset = torch.utils.data.DataLoader(test, batch_size=10, shuffle=False)
+
+
+print(train)
+print('===============')
+print(trainset)
+"""
+class DiceNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.il = nn.Linear(600,20)
+        self.hl = nn.Linear(20,10)
+        self.hl2 = nn.Linear(10,10)
+        self.ol = nn.Linear(10,2)
+    
+    def forward(self, x):
+        x = F.relu(self.il(x))
+        x = F.relu(self.hl(x))
+        x = F.relu(self.hl2(x))
+        x = F.relu(self.ol(x))
+        return F.log_softmax(x,dim=1)
+
+net = DiceNet()
+
+loss_function = nn.MSELoss()
+optimizer = optim.Adam(net.parameters(), lr=0.00001)
+
+for epoch in range(20): # 3 full passes over the data
+    idx=0
+    for data in train[0]:  # `data` is a batch of data
+        X = data  # X is the batch of features, y is the batch of targets.
+        X = torch.Tensor(X)
+        y= train[1][idx]
+        
+        idx+=1
+        if idx%5==0:
+            net.zero_grad()  # sets gradients to 0 before loss calc. You will do this likely every step.
+        output = net(X.view(-1,600))  # pass in the reshaped batch (recall they are 28x28 atm)
+        loss = loss_function(output, y.view(1,2))  # calc and grab the loss value
+        loss.backward()  # apply this loss backwards thru the network's parameters
+        optimizer.step()  # attempt to optimize weights to account for loss/gradients
+    print(loss)  # print loss. We hope loss (a measure of wrong-ness) declines! 
+
+
+print('======')
+print(net(torch.Tensor(unbiased_dice_seq(600)).view(-1,600)))
+print('======')
+
+correct = 0
+total = 0
+
+with torch.no_grad():
+    index=0
+    for data in test[0]:
+        
+        X = data
+        X= torch.Tensor(X)
+        y= test[1][index]
+        index+=1
+        output = net(X.view(-1,600))
+        #print(output)
+        for idx, i in enumerate(output):
+            #print(torch.argmax(i), y[idx])
+            if torch.argmax(i) == y[idx]:
+                correct += 1
+            total += 1
+
+print("Accuracy: ", round(correct/total, 3))
