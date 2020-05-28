@@ -1,0 +1,147 @@
+import torch
+import random as r
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+
+
+def generate_biased_dice_seq(len_seq):
+    """
+    Rolls a biased dice n number of times in the following probabilities:
+    1: 10%
+    2: 10%
+    3: 10%
+    4: 15%
+    5: 20%
+    6: 35%
+    """
+    seq = []
+    for dummy in range(len_seq):
+        x = r.random()
+
+        if x <= .05:
+            seq.append(1)
+        elif x <=.1:
+            seq.append(2)
+        elif x <=.2:
+            seq.append(3)
+        elif x <=.3:
+            seq.append(4)
+        elif x <=.5:
+            seq.append(5)
+        else:
+            seq.append(6)
+    
+    return seq
+
+def unbiased_dice_seq(len_seq):
+    """
+    returns a list of a given length with fair dice rolls
+    """
+    seq = [r.randint(1,6) for dummy in range(len_seq)]
+    return seq
+
+
+def generate_training_data(num_samples,len_seq):
+    """
+    store a number of samples of both types, biased and unbiased, 
+    in tensors along with their expected output
+    """
+    training = []
+    target = []
+    #generate samples
+    for dummy in range(num_samples):
+        training.append(generate_biased_dice_seq(len_seq))
+        target.append([1,0]) #1 hot vector, if 0th node a 1 that means biased
+        training.append(unbiased_dice_seq(len_seq))
+        target.append([0,1])
+    return torch.Tensor(training), torch.Tensor(target)
+
+def generate_test_data(num_samples,len_seq):
+    """
+    generate a number of testing cases, same format as training data
+    """
+    test = []
+    target = [] #contains expected values
+    for dummy in range(num_samples):
+        test.append(generate_biased_dice_seq(len_seq))
+        target.append([1,0])
+        test.append(unbiased_dice_seq(len_seq))
+        target.append([0,1])
+    return torch.Tensor(test),torch.Tensor(target)
+
+#run a certain amount of cases
+train = generate_training_data(500,100)
+test = generate_test_data(32,100)
+
+#Define the Dice Neural Net with parent as nn module
+class DiceNet(nn.Module):
+    def __init__(self):
+        super().__init__() 
+
+        #single hidden layer, 2 node output layer
+        self.il = nn.Linear(100,20)
+        self.hl = nn.ReLU()
+        self.ol = nn.Linear(20,2)
+    
+    #feed forward
+    def forward(self, x):
+        x = self.il(x)
+        x = self.hl(x)
+        x = self.ol(x)
+        return x 
+
+net = DiceNet()
+
+#initialize loss function and optimizer
+loss_function = nn.MSELoss()
+optimizer = optim.Adam(net.parameters(), lr=0.001)
+
+#pass through data 15 times
+for epoch in range(15): # 3 full passes over the data
+    idx=0
+    for data in train[0]:  # `data` is a batch of data
+        X = data  # X is the batch of features, y is the batch of targets.
+        X = torch.Tensor(X)
+        y= train[1][idx]
+        
+        idx+=1
+        #batch size of 5
+        if idx%5==0:
+            optimizer.zero_grad()  # sets gradients to 0 before loss calc
+
+        output = net(X.view(-1,100))  # pass in the reshaped batch
+        loss = loss_function(output, y.view(1,2))  # calc and grab the loss value
+        loss.backward()  # apply this loss backwards thru the network's parameters
+        optimizer.step()  # attempt to optimize weights to account for loss/gradients
+    print(f'Loss: {loss}')   
+
+
+#test our trained network!
+correct = 0
+total = 0
+
+with torch.no_grad():
+    index=0
+    for data in test[0]:
+        
+        X = data
+        X= torch.Tensor(X)
+        y= test[1][index]
+        index+=1
+
+        #reformat float tensor into one hot list
+        output = net(X.view(-1,100))
+        output = list(output[0])
+        output = [int(round(float(item),0)) for item in output]
+        #reformat y into one hot list
+        y = [int(item) for item in y]
+        #check performance
+        if y==output:
+            correct+=1
+            total+=1
+        
+print("Accuracy: ", round(correct/total, 3))
+
+
+
