@@ -2,22 +2,12 @@ import os
 import cv2 
 from tqdm import tqdm
 import numpy as np
-
+from PIL import Image
 import torch
 import torchvision
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-
-"""
-
-
-NOTE: DATA SET USED WAS "KAGGLE DOGS AND CATS". YOU CAN DOWNLOAD ON MICROSOFTS WEBSITE 
-
-
-"""
-
-
 
 
 REBUILD_DATA = False
@@ -60,6 +50,10 @@ if REBUILD_DATA:
 
 training_data = np.load('training_Data.npy',allow_pickle = True)
 
+RETRAIN = False
+
+
+
 class Net(nn.Module):
     def __init__(self):
         super().__init__()
@@ -97,56 +91,69 @@ class Net(nn.Module):
 
 
 
+if RETRAIN:
+
+    net = Net()
 
 
-net = Net()
+    optimizer = optim.Adam(net.parameters(),lr=.001)
+    loss_func = nn.MSELoss()
+
+    X = torch.Tensor([i[0] for i in training_data]).view(-1,100,100)
+    X = X/255.0
+    y = torch.Tensor([i[1] for i in training_data])
+
+    VAL_PCT = .1
+    val_size = int(len(X)*VAL_PCT)
+
+    X_train = X[:-val_size]
+    X_test = X[-val_size:]
+    Y_train = y[:-val_size]
+    Y_test = y[-val_size:]
 
 
-optimizer = optim.Adam(net.parameters(),lr=.001)
-loss_func = nn.MSELoss()
+    BATCH_SIZE = 64
 
-X = torch.Tensor([i[0] for i in training_data]).view(-1,100,100)
-X = X/255.0
-y = torch.Tensor([i[1] for i in training_data])
+    EPOCHS = 5
 
-VAL_PCT = .1
-val_size = int(len(X)*VAL_PCT)
+    for epoch in range(EPOCHS):
+        for i in range(0,len(X_train),BATCH_SIZE):
+            batch_X = X_train[i:i+BATCH_SIZE].view(-1,1,100,100)
+            batch_y = Y_train[i:i+BATCH_SIZE]
 
-X_train = X[:-val_size]
-X_test = X[-val_size:]
-Y_train = y[:-val_size]
-Y_test = y[-val_size:]
+            net.zero_grad()
+            outputs = net(batch_X)
+            loss = loss_func(outputs, batch_y)
+            loss.backward()
+            optimizer.step()
+
+    print(loss)
+
+    correct=0
+    total=0
 
 
-BATCH_SIZE = 64
 
-EPOCHS = 5
 
-for epoch in range(EPOCHS):
-    for i in range(0,len(X_train),BATCH_SIZE):
-        batch_X = X_train[i:i+BATCH_SIZE].view(-1,1,100,100)
-        batch_y = Y_train[i:i+BATCH_SIZE]
 
-        net.zero_grad()
-        outputs = net(batch_X)
-        loss = loss_func(outputs, batch_y)
-        loss.backward()
-        optimizer.step()
+    with torch.no_grad():
+        for i in range(len(X_test)):
+            real_class = torch.argmax(Y_test[i])
+            net_out = net(X_test[i].view(-1,1,100,100))[0]
+            predicted = torch.argmax(net_out)
+            if predicted == real_class:
+                correct+=1
+            total+=1
 
-print(loss)
+    print(f'Accurancy: {round(correct/total, 3)}')
 
-correct=0
-total=0
-
-with torch.no_grad():
-    for i in range(len(X_test)):
-        real_class = torch.argmax(Y_test[i])
-        net_out = net(X_test[i].view(-1,1,100,100))[0]
-        predicted = torch.argmax(net_out)
-        if predicted == real_class:
-            correct+=1
-        total+=1
-
-print(f'Accurancy: {round(correct/total, 3)}')
+    torch.save(net.state_dict(), 'my_model.pt') 
     
-
+#TESTING MY NET ON A PIC OF MY DOG :)
+model = Net()
+model.load_state_dict(torch.load('my_model.pt'))
+img = cv2.imread('Winston.jpg', cv2.IMREAD_GRAYSCALE)
+img = cv2.resize(img, (100,100))
+img = torch.Tensor(img)
+img = img.view(-1,1, 100,100)
+print(model(img)) #It worked btw
